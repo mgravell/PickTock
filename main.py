@@ -1,12 +1,25 @@
-from machine import Pin
+from machine import Pin, I2C
 import time
+from pico_i2c_lcd import I2cLcd
 
-led = Pin("LED", Pin.OUT)
-for i in range(2):
-    led.on()
-    time.sleep(0.25)
-    led.off()
-    time.sleep(0.25)
+led = Pin("LED")
+led.off()
+resetButton = Pin(17, Pin.IN, Pin.PULL_UP)
+runButton = Pin(21, Pin.IN, Pin.PULL_UP)
+
+i2c = I2C(0, sda=Pin(0), scl=Pin(1))
+lcd = I2cLcd(i2c, 63, 2, 16)
+devices = i2c.scan()
+
+def resetButtonPressed():
+  return False if resetButton.value() else True
+
+def runButtonPressed():
+  return False if runButton.value() else True
+
+def show(message):
+    lcd.move_to(0, 1)
+    lcd.putstr(message)
     
 class Motor:
     def __init__(self, pins):
@@ -14,14 +27,22 @@ class Motor:
         self.__pos = 0
         self.__phaseIndex = 0
         self.__phases = [1, 1 | 2, 2, 2 | 4, 4, 4 | 8, 8, 8 | 1]
-        print(self.__pins)
-
+        
+    def Show(self):
+        lcd.move_to(0, 0)
+        lcd.putstr(f"{self.__pos:09}")
+    
+    def Reset(self):
+        self.__pos = 0
+    
     def MoveRelative(self, delta):
+        show('run  ')
         delta = int(delta)
         target = self.__pos + delta
         incr = 1 if delta > 0 else -1
         oldPhase = 0 # assume all off
-        while self.__pos != target:
+        led.on()
+        while self.__pos != target and runButtonPressed():
             phaseIndex = self.__phaseIndex + incr
             newPhase = self.__phases[phaseIndex & 7]
             
@@ -42,22 +63,28 @@ class Motor:
             self.__pos = self.__pos + incr
             oldPhase = newPhase
             time.sleep(0.001)
-        
+            
         # turn all off
         for pin in self.__pins:
             pin.off()
-
+        led.off()
         print("Moved to %2d " % (self.__pos))
+        self.Show()
+        show('stop ')
 
     def MoveAbsolute(self, value):
         MoveRelative(value - self.__pos)
 
-
 motor = Motor([2,3,4,5])
-for index in range(10):
-    motor.MoveRelative(500)
-    motor.MoveRelative(-1000)
-    motor.MoveRelative(500)
-    motor.MoveRelative(-100)
-    motor.MoveRelative(+200)
-    motor.MoveRelative(-100)
+
+show('init ')
+while True:
+    if resetButtonPressed():
+        motor.Reset()
+        show('reset')
+    elif runButtonPressed():
+        motor.MoveRelative(10000000)
+        show('run  ')
+    time.sleep(0.05)
+    motor.Show()
+    
